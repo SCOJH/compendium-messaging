@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write  # nuget.org Trusted Publishing (OIDC)
 
 jobs:
   pack-publish:
@@ -59,12 +60,20 @@ jobs:
             --source https://nuget.pkg.github.com/SCOJH/index.json \
             --skip-duplicate
 
+      # Trusted Publishing: OIDC -> cle ephemere nuget.org (policy SCOJH/<repo> + release.yml, owner sachahennaut)
+      - name: NuGet login (OIDC)
+        id: nuget-login
+        continue-on-error: true
+        uses: NuGet/login@v1
+        with:
+          user: sachahennaut
+
       - name: Push to nuget.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY || secrets.NUGET_API_KEY }}
         run: |
           if [ -z "$NUGET_API_KEY" ]; then
-            echo "::warning::NUGET_API_KEY is empty — skipping nuget.org publish (GitHub Packages already has this version). Grant this repo visibility on the org secret and re-run to publish publicly."
+            echo "::warning::Pas de credential nuget.org (OIDC KO et NUGET_API_KEY vide) — publish nuget.org skippe."
             exit 0
           fi
           dotnet nuget push "artifacts/*.nupkg" \
