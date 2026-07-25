@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Compendium.Adapters.Discord</AssemblyName>
+    <RootNamespace>Compendium.Adapters.Discord</RootNamespace>
+    <PackageId>Compendium.Adapters.Discord</PackageId>
+    <Description>Discord Interactions adapter for the Compendium framework. Implements IMessagingConnector (Compendium.Abstractions.Messaging): Ed25519 (X-Signature-Ed25519) inbound verification, PING/PONG handshake, APPLICATION_COMMAND payload parsing, and outbound sends via the Discord REST API. Credentials supplied per call for multi-tenant hosting.</Description>
+    <PackageTags>compendium;adapter;discord;messaging;interactions;chat</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Compendium.Core" />
+    <PackageReference Include="Compendium.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Compendium.Abstractions.Messaging\Compendium.Abstractions.Messaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NSec.Cryptography" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Compendium.Adapters.Discord.Tests" />
+  </ItemGroup>
+
+</Project>

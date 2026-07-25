@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  pack-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # MinVer needs full history
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test (unit only)
+        run: |
+          dotnet test -c Release --no-build \
+            --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~LoadTests"
+
+      - name: Pack domain packages (excluding tests)
+        run: |
+          mkdir -p artifacts
+          # Six packable projects ship from the same tag: the messaging abstraction
+          # (Compendium.Abstractions.Messaging) and the five platform adapters
+          # (Compendium.Adapters.{Discord,Slack,Teams,Telegram,WhatsApp}).
+          # Test projects are IsPackable=false and never land in src/ anyway.
+          while IFS= read -r csproj; do
+            name=$(basename "$csproj" .csproj)
+            if [[ "$name" == Compendium.* && "$name" != *.Tests ]]; then
+              echo "Packing $name"
+              dotnet pack "$csproj" -c Release --no-build -o artifacts/
+            fi
+          done < <(find src -name '*.csproj')
+          ls -la artifacts/
+          count=$(ls artifacts/*.nupkg 2>/dev/null | wc -l)
+          test "$count" -ge "6" || { echo "Expected at least 6 .nupkg in artifacts/ (abstraction + 5 adapters), found $count"; exit 1; }
+
+      # GitHub Packages first: it only needs GITHUB_TOKEN, and downstream consumers
+      # restore from this feed.
+      - name: Push to GitHub Packages (primary feed)
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key ${{ secrets.GITHUB_TOKEN }} \
+            --source https://nuget.pkg.github.com/SCOJH/index.json \
+            --skip-duplicate
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::warning::NUGET_API_KEY is empty — skipping nuget.org publish (GitHub Packages already has this version). Grant this repo visibility on the org secret and re-run to publish publicly."
+            exit 0
+          fi
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          files: artifacts/*.nupkg
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-preview') || contains(github.ref, '-rc') || contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}

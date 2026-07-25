@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Compendium.Adapters.Telegram</AssemblyName>
+    <RootNamespace>Compendium.Adapters.Telegram</RootNamespace>
+    <PackageId>Compendium.Adapters.Telegram</PackageId>
+    <Description>Telegram Bot API adapter for the Compendium framework. Implements IMessagingConnector (Compendium.Abstractions.Messaging): verifies inbound Telegram webhooks (X-Telegram-Bot-Api-Secret-Token) and sends replies via the Bot API sendMessage endpoint. Bot token supplied per call for multi-tenant hosting.</Description>
+    <PackageTags>compendium;adapter;telegram;messaging;bot;chat</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compendium framework base — published NuGets; the Messaging abstraction is in-repo (ProjectReference below). -->
+    <PackageReference Include="Compendium.Core" />
+    <PackageReference Include="Compendium.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Compendium.Abstractions.Messaging\Compendium.Abstractions.Messaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Compendium.Adapters.Telegram.Tests" />
+  </ItemGroup>
+
+</Project>
