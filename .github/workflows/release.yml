@@ -73,8 +73,9 @@ jobs:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY || secrets.NUGET_API_KEY }}
         run: |
           if [ -z "$NUGET_API_KEY" ]; then
-            echo "::warning::Pas de credential nuget.org (OIDC KO et NUGET_API_KEY vide) — publish nuget.org skippe."
-            exit 0
+            echo "::error::Pas de credential nuget.org : OIDC KO et NUGET_API_KEY vide."
+            echo "::error::La release ne publie RIEN. Un warning ici a masque 5 semaines de faux vert (cf. sassy-backlog#432)."
+            exit 1
           fi
           dotnet nuget push "artifacts/*.nupkg" \
             --api-key "$NUGET_API_KEY" \
