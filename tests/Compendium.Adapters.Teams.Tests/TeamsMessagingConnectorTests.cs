@@ -9,7 +9,7 @@ using System.Text;
 using Compendium.Abstractions.Messaging;
 using Compendium.Abstractions.Messaging.Models;
 using Compendium.Adapters.Teams;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
