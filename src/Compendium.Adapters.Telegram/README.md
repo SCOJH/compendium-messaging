@@ -4,7 +4,8 @@ Telegram Bot API adapter for the [Compendium](https://github.com/sassy-solutions
 framework. Implements `IMessagingConnector` (from `Compendium.Abstractions.Messaging`) so an
 agent or service can receive and reply to Telegram messages with a normalized, multi-tenant API.
 
-- **Inbound**: verifies the `X-Telegram-Bot-Api-Secret-Token` header and projects a Telegram
+- **Inbound**: verifies the `X-Telegram-Bot-Api-Secret-Token` header (constant-time comparison,
+  when a `secretToken` is configured) and projects a Telegram
   `Update` onto a normalized `InboundMessage` (chat id, text, sender, attachments).
 - **Outbound**: sends replies via `POST /bot{token}/sendMessage`.
 - **Multi-tenant**: the bot token + webhook secret are supplied per call via `ChannelCredentials`,

@@ -73,7 +73,9 @@ public sealed class WhatsAppMessagingConnector : IMessagingConnector
         {
             var expected = credentials.Get(VerifyTokenKey);
             var provided = query.GetValueOrDefault("hub.verify_token");
-            if (!string.IsNullOrEmpty(expected) && string.Equals(provided, expected, StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(expected)
+                && provided is not null
+                && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(expected)))
             {
                 var challenge = query.GetValueOrDefault("hub.challenge") ?? string.Empty;
                 return Result.Success(new InboundEnvelope(

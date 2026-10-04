@@ -5,6 +5,7 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -43,16 +44,29 @@ public sealed class DiscordMessagingConnector : IMessagingConnector
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly DiscordOptions _options;
     private readonly ILogger<DiscordMessagingConnector> _logger;
+    private readonly TimeProvider _time;
 
-    /// <summary>Initialises a new instance.</summary>
+    /// <summary>Initialises a new instance, on the system clock.</summary>
     public DiscordMessagingConnector(
         IHttpClientFactory httpClientFactory,
         IOptions<DiscordOptions> options,
         ILogger<DiscordMessagingConnector> logger)
+        : this(httpClientFactory, options, logger, TimeProvider.System)
+    {
+    }
+
+    /// <summary>Initialises a new instance; <paramref name="time"/> is the clock request timestamps are checked against.</summary>
+    public DiscordMessagingConnector(
+        IHttpClientFactory httpClientFactory,
+        IOptions<DiscordOptions> options,
+        ILogger<DiscordMessagingConnector> logger,
+        TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(time);
+        _time = time;
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
@@ -74,9 +88,11 @@ public sealed class DiscordMessagingConnector : IMessagingConnector
             return Result.Failure<InboundEnvelope>(publicKey.Error);
         }
 
+        // The signed timestamp must also be current: the signature proves who wrote the request, not
+        // when, and a captured interaction would otherwise be accepted every time it is sent again.
         var signature = GetHeader(request.Headers, SignatureHeader);
         var timestamp = GetHeader(request.Headers, TimestampHeader);
-        if (!VerifySignature(publicKey.Value, timestamp, request.Body, signature))
+        if (!IsCurrent(timestamp) || !VerifySignature(publicKey.Value, timestamp, request.Body, signature))
         {
             return Result.Failure<InboundEnvelope>(MessagingErrors.InvalidSignature(Platform));
         }
@@ -241,6 +257,19 @@ public sealed class DiscordMessagingConnector : IMessagingConnector
         }
 
         return null;
+    }
+
+    /// <summary>Whether <paramref name="timestamp"/> (Unix seconds) is within <see cref="DiscordOptions.TimestampTolerance"/> of now.</summary>
+    private bool IsCurrent(string? timestamp)
+    {
+        if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            || seconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds())
+        {
+            return false;
+        }
+
+        var age = _time.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(seconds);
+        return age.Duration() <= _options.TimestampTolerance;
     }
 
     private static bool VerifySignature(string publicKeyHex, string? timestamp, string body, string? signatureHex)
