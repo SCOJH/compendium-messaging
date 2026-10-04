@@ -22,10 +22,23 @@ public sealed class SlackMessagingConnectorTests
     private const string SigningSecret = "signing-secret-123";
     private const string Timestamp = "1700000000";
 
-    private static SlackMessagingConnector Build(StubHandler? handler = null) =>
+    // The suite's requests are signed at Timestamp; the connector's clock reads 30 seconds later.
+    private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1700000030);
+
+    private static SlackMessagingConnector Build(StubHandler? handler = null, DateTimeOffset? now = null) =>
         new(new StubHttpClientFactory(handler ?? new StubHandler(HttpStatusCode.OK, "{}")),
             Options.Create(new SlackOptions()),
-            NullLogger<SlackMessagingConnector>.Instance);
+            NullLogger<SlackMessagingConnector>.Instance,
+            new FixedClock(now ?? Now));
+
+    private static InboundRequest SignedRequest(string body, string timestamp = Timestamp) =>
+        new(
+            new Dictionary<string, string>
+            {
+                ["X-Slack-Request-Timestamp"] = timestamp,
+                ["X-Slack-Signature"] = Sign(body, timestamp),
+            },
+            body);
 
     private static ChannelCredentials Creds() => new(new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -52,9 +65,7 @@ public sealed class SlackMessagingConnectorTests
     public void ParseInbound_UrlVerification_EchoesChallenge()
     {
         var connector = Build();
-        var request = new InboundRequest(
-            new Dictionary<string, string>(),
-            """{"type":"url_verification","challenge":"abc123challenge"}""");
+        var request = SignedRequest("""{"type":"url_verification","challenge":"abc123challenge"}""");
 
         var result = connector.ParseInbound(request, Creds());
 
@@ -64,6 +75,84 @@ public sealed class SlackMessagingConnectorTests
         result.Value.Acknowledgement!.StatusCode.Should().Be(200);
         result.Value.Acknowledgement.Body.Should().Be("abc123challenge");
         result.Value.Acknowledgement.ContentType.Should().Be("text/plain");
+    }
+
+    /// <summary>
+    /// Slack signs url_verification like every other request. Echoing an unsigned challenge told any
+    /// caller whether a signing secret was configured: an echo when it was, a refusal when it was not.
+    /// </summary>
+    [Fact]
+    public void ParseInbound_UnsignedUrlVerification_IsRefused()
+    {
+        var connector = Build();
+        var request = new InboundRequest(
+            new Dictionary<string, string>(),
+            """{"type":"url_verification","challenge":"abc123challenge"}""");
+
+        var result = connector.ParseInbound(request, Creds());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
+    }
+
+    /// <summary>
+    /// A correctly signed request whose timestamp is more than the tolerance away from now, in the past
+    /// (captured and replayed) or in the future (prepared in advance), is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(-301)]
+    [InlineData(301)]
+    [InlineData(-86_400)]
+    public void ParseInbound_SignedTimestampOutsideTheTolerance_IsRefused(int secondsFromNow)
+    {
+        var connector = Build(now: Now);
+        var stamp = (Now.ToUnixTimeSeconds() + secondsFromNow).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = connector.ParseInbound(SignedRequest(MessageBody, stamp), Creds());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
+    }
+
+    [Theory]
+    [InlineData(-299)]
+    [InlineData(299)]
+    public void ParseInbound_SignedTimestampWithinTheTolerance_IsAccepted(int secondsFromNow)
+    {
+        var connector = Build(now: Now);
+        var stamp = (Now.ToUnixTimeSeconds() + secondsFromNow).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = connector.ParseInbound(SignedRequest(MessageBody, stamp), Creds());
+
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Message : null);
+    }
+
+    /// <summary>The tolerance is the host's to set: a wider window admits what the default refuses.</summary>
+    [Fact]
+    public void ParseInbound_ToleranceComesFromTheOptions()
+    {
+        var connector = new SlackMessagingConnector(
+            new StubHttpClientFactory(new StubHandler(HttpStatusCode.OK, "{}")),
+            Options.Create(new SlackOptions { TimestampTolerance = TimeSpan.FromHours(1) }),
+            NullLogger<SlackMessagingConnector>.Instance,
+            new FixedClock(Now.AddMinutes(30)));
+
+        connector.ParseInbound(SignedRequest(MessageBody), Creds()).IsSuccess.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("soon")]
+    [InlineData("-1700000000")]
+    [InlineData("9223372036854775807")]
+    public void ParseInbound_UnreadableTimestamp_IsRefused(string stamp)
+    {
+        var connector = Build();
+
+        var result = connector.ParseInbound(SignedRequest(MessageBody, stamp), Creds());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
     }
 
     [Fact]
@@ -195,6 +284,11 @@ public sealed class SlackMessagingConnectorTests
                 Content = new StringContent(_body, Encoding.UTF8, "application/json"),
             };
         }
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory

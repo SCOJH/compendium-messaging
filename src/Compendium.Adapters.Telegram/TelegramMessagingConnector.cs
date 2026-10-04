@@ -7,6 +7,8 @@
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -58,15 +60,14 @@ public sealed class TelegramMessagingConnector : IMessagingConnector
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(credentials);
 
-        // Verify the secret token when the tenant configured one.
+        // Verify the secret token when the tenant configured one. The comparison runs in constant time,
+        // like the HMAC checks of Slack and WhatsApp: this header IS Telegram's whole proof, and an
+        // ordinal comparison returns sooner the earlier the first wrong character is.
         var expectedSecret = credentials.Get(SecretTokenKey);
-        if (!string.IsNullOrEmpty(expectedSecret))
+        if (!string.IsNullOrEmpty(expectedSecret)
+            && !SecretsEqual(GetHeader(request.Headers, SecretHeader), expectedSecret))
         {
-            var provided = GetHeader(request.Headers, SecretHeader);
-            if (!string.Equals(provided, expectedSecret, StringComparison.Ordinal))
-            {
-                return Result.Failure<InboundEnvelope>(MessagingErrors.InvalidSignature(Platform));
-            }
+            return Result.Failure<InboundEnvelope>(MessagingErrors.InvalidSignature(Platform));
         }
 
         JsonDocument document;
@@ -241,6 +242,10 @@ public sealed class TelegramMessagingConnector : IMessagingConnector
 
     private static string ScalarToString(JsonElement element) =>
         element.ValueKind == JsonValueKind.String ? element.GetString() ?? string.Empty : element.GetRawText();
+
+    private static bool SecretsEqual(string? provided, string expected) =>
+        provided is not null
+        && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(expected));
 
     private static string? GetHeader(IReadOnlyDictionary<string, string> headers, string name)
     {

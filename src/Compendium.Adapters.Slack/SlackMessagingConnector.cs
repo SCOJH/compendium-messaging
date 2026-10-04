@@ -40,19 +40,32 @@ public sealed class SlackMessagingConnector : IMessagingConnector
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SlackOptions _options;
     private readonly ILogger<SlackMessagingConnector> _logger;
+    private readonly TimeProvider _time;
 
-    /// <summary>Initialises a new instance.</summary>
+    /// <summary>Initialises a new instance, on the system clock.</summary>
     public SlackMessagingConnector(
         IHttpClientFactory httpClientFactory,
         IOptions<SlackOptions> options,
         ILogger<SlackMessagingConnector> logger)
+        : this(httpClientFactory, options, logger, TimeProvider.System)
+    {
+    }
+
+    /// <summary>Initialises a new instance; <paramref name="time"/> is the clock request timestamps are checked against.</summary>
+    public SlackMessagingConnector(
+        IHttpClientFactory httpClientFactory,
+        IOptions<SlackOptions> options,
+        ILogger<SlackMessagingConnector> logger,
+        TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(time);
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+        _time = time;
     }
 
     /// <inheritdoc />
@@ -78,7 +91,24 @@ public sealed class SlackMessagingConnector : IMessagingConnector
         {
             var root = document.RootElement;
 
-            // 1) url_verification challenge — echo the challenge before any signature gate.
+            // 1) Verify the v0 signature over "v0:{timestamp}:{rawBody}", and that the signed timestamp
+            //    is current. Slack signs every request, url_verification included, so nothing is
+            //    answered before this: echoing the challenge first told any caller whether a signing
+            //    secret was configured (an echo when it was, a refusal when it was not).
+            var signingSecret = credentials.Get(SigningSecretKey);
+            var timestamp = GetHeader(request.Headers, TimestampHeader);
+            if (string.IsNullOrEmpty(signingSecret)
+                || !IsCurrent(timestamp)
+                || !VerifySignature(
+                    request.Body,
+                    signingSecret,
+                    timestamp,
+                    GetHeader(request.Headers, SignatureHeader)))
+            {
+                return Result.Failure<InboundEnvelope>(MessagingErrors.InvalidSignature(Platform));
+            }
+
+            // 2) url_verification challenge — echo it back.
             if (root.TryGetProperty("type", out var topType)
                 && topType.ValueKind == JsonValueKind.String
                 && topType.GetString() == "url_verification")
@@ -87,18 +117,6 @@ public sealed class SlackMessagingConnector : IMessagingConnector
                 return Result.Success(new InboundEnvelope(
                     Array.Empty<InboundMessage>(),
                     new ChannelAck(200, challenge, "text/plain")));
-            }
-
-            // 2) Verify the v0 signature over "v0:{timestamp}:{rawBody}".
-            var signingSecret = credentials.Get(SigningSecretKey);
-            if (string.IsNullOrEmpty(signingSecret)
-                || !VerifySignature(
-                    request.Body,
-                    signingSecret,
-                    GetHeader(request.Headers, TimestampHeader),
-                    GetHeader(request.Headers, SignatureHeader)))
-            {
-                return Result.Failure<InboundEnvelope>(MessagingErrors.InvalidSignature(Platform));
             }
 
             // 3) Parse the event — a user "message" event with no bot_id yields one InboundMessage.
@@ -221,6 +239,23 @@ public sealed class SlackMessagingConnector : IMessagingConnector
             MessageId = ts,
             Timestamp = timestamp,
         };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="timestamp"/> (Unix seconds) is within <see cref="SlackOptions.TimestampTolerance"/>
+    /// of now. The signature proves who wrote a request, not when: without this a captured request could
+    /// be replayed forever.
+    /// </summary>
+    private bool IsCurrent(string? timestamp)
+    {
+        if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            || seconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds())
+        {
+            return false;
+        }
+
+        var age = _time.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(seconds);
+        return age.Duration() <= _options.TimestampTolerance;
     }
 
     private static bool VerifySignature(string body, string signingSecret, string? timestamp, string? signature)

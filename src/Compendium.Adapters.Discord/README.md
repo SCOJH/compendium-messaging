@@ -4,7 +4,9 @@ Discord Interactions adapter for the [Compendium](https://github.com/sassy-solut
 framework. Implements `IMessagingConnector` (from `Compendium.Abstractions.Messaging`).
 
 - **Inbound verification (POST)**: validates the `X-Signature-Ed25519` / `X-Signature-Timestamp`
-  headers against the application's Ed25519 public key (per Discord's security model).
+  headers against the application's Ed25519 public key (per Discord's security model), and refuses a
+  timestamp further than `DiscordOptions.TimestampTolerance` (5 minutes by default, either way) from
+  the current time: a captured interaction cannot be replayed later.
 - **PING handling**: replies to `type: 1` (PING) interactions with the `type: 1` (PONG) ack.
 - **Inbound commands (POST)**: projects `type: 2` (APPLICATION_COMMAND) interactions onto a
   normalized `InboundMessage`.

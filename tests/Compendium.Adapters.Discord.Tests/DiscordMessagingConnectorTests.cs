@@ -29,10 +29,14 @@ public sealed class DiscordMessagingConnectorTests
 
     private const string Timestamp = "1700000000";
 
-    private static DiscordMessagingConnector Build(StubHandler? handler = null) =>
+    // The suite's requests are signed at Timestamp; the connector's clock reads 30 seconds later.
+    private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1700000030);
+
+    private static DiscordMessagingConnector Build(StubHandler? handler = null, DateTimeOffset? now = null) =>
         new(new StubHttpClientFactory(handler ?? new StubHandler(HttpStatusCode.OK, "{}")),
             Options.Create(new DiscordOptions()),
-            NullLogger<DiscordMessagingConnector>.Instance);
+            NullLogger<DiscordMessagingConnector>.Instance,
+            new FixedClock(now ?? Now));
 
     private static ChannelCredentials Creds() => new(new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -40,21 +44,65 @@ public sealed class DiscordMessagingConnectorTests
         ["botToken"] = "bot-token-xyz",
     });
 
-    private static string Sign(string body)
+    private static string Sign(string body, string timestamp = Timestamp)
     {
-        var message = Encoding.UTF8.GetBytes(Timestamp + body);
+        var message = Encoding.UTF8.GetBytes(timestamp + body);
         var signature = SignatureAlgorithm.Ed25519.Sign(SigningKey, message);
         return Convert.ToHexString(signature).ToLowerInvariant();
     }
 
-    private static InboundRequest SignedRequest(string body) =>
+    private static InboundRequest SignedRequest(string body, string timestamp = Timestamp) =>
         new(
             new Dictionary<string, string>
             {
-                ["X-Signature-Ed25519"] = Sign(body),
-                ["X-Signature-Timestamp"] = Timestamp,
+                ["X-Signature-Ed25519"] = Sign(body, timestamp),
+                ["X-Signature-Timestamp"] = timestamp,
             },
             body);
+
+    /// <summary>
+    /// A correctly signed interaction whose timestamp is more than the tolerance away from now, in the
+    /// past (captured and replayed) or in the future, is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(-301)]
+    [InlineData(301)]
+    [InlineData(-86_400)]
+    public void ParseInbound_SignedTimestampOutsideTheTolerance_IsRefused(int secondsFromNow)
+    {
+        var connector = Build(now: Now);
+        var stamp = (Now.ToUnixTimeSeconds() + secondsFromNow).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = connector.ParseInbound(SignedRequest("""{"type":1}""", stamp), Creds());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
+    }
+
+    [Theory]
+    [InlineData(-299)]
+    [InlineData(299)]
+    public void ParseInbound_SignedTimestampWithinTheTolerance_IsAccepted(int secondsFromNow)
+    {
+        var connector = Build(now: Now);
+        var stamp = (Now.ToUnixTimeSeconds() + secondsFromNow).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = connector.ParseInbound(SignedRequest("""{"type":1}""", stamp), Creds());
+
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Message : null);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("soon")]
+    [InlineData("9223372036854775807")]
+    public void ParseInbound_UnreadableTimestamp_IsRefused(string stamp)
+    {
+        var result = Build().ParseInbound(SignedRequest("""{"type":1}""", stamp), Creds());
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
+    }
 
     [Fact]
     public void ParseInbound_Ping_ReturnsPongAck()
@@ -218,6 +266,11 @@ public sealed class DiscordMessagingConnectorTests
                 Content = new StringContent(_body, Encoding.UTF8, "application/json"),
             };
         }
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory

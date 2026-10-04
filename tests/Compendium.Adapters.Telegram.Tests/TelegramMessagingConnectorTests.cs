@@ -98,6 +98,32 @@ public sealed class TelegramMessagingConnectorTests
         result.Error.Code.Should().Be("Messaging.InvalidSignature");
     }
 
+    /// <summary>
+    /// The secret header is Telegram's whole proof, compared in constant time: a header that is a prefix
+    /// of the secret, one wrong only in its last character, one differing only in case, or none at all,
+    /// is refused like any other.
+    /// </summary>
+    [Theory]
+    [InlineData("s3cr3")]
+    [InlineData("s3cr3T")]
+    [InlineData("S3CR3T")]
+    [InlineData("s3cr3t ")]
+    [InlineData(null)]
+    public void ParseInbound_WithANearMissSecret_FailsWithInvalidSignature(string? provided)
+    {
+        var connector = Build();
+        var headers = new Dictionary<string, string>();
+        if (provided is not null)
+        {
+            headers["X-Telegram-Bot-Api-Secret-Token"] = provided;
+        }
+
+        var result = connector.ParseInbound(new InboundRequest(headers, ValidUpdate), Creds(secret: "s3cr3t"));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.InvalidSignature");
+    }
+
     [Fact]
     public void ParseInbound_NonMessageUpdate_ReturnsEmptyEnvelope()
     {
