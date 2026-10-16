@@ -33,8 +33,11 @@ exceptions for control flow.
 | `Compendium.Adapters.Teams` | Microsoft Teams (Bot Framework) — Activity parsing, AAD client-credentials token, Bot Connector replies. |
 | `Compendium.Adapters.WhatsApp` | WhatsApp Cloud API — `hub.challenge` GET verification, `X-Hub-Signature-256` HMAC, Graph API sends. |
 
-All packages target `net9.0` and are versioned together from git tags
-(MinVer, tag prefix `v`, `1.1.x` train).
+All packages target `net9.0` and `net10.0` — both until .NET 9 leaves support on
+2026-11-10 — and are versioned together from git tags (MinVer, tag prefix `v`,
+`1.1.x` train). Building the repository needs the .NET 10 SDK (`global.json`);
+running the `net9.0` half of the tests also needs the .NET 9 runtime, which the
+.NET 9 SDK brings.
 
 ## Build
 

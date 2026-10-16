@@ -18,10 +18,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # NET10-01 — global.json pins the .NET 10 SDK, which builds both targets;
+      # the .NET 9 SDK is here for its runtime, without which the net9.0 half of
+      # every test project has nothing to run on (a global-json-file install
+      # would bring only the SDK 10 and its runtime).
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: global.json
+          dotnet-version: |
+            9.0.x
+            10.0.x
 
       - name: Restore
         run: dotnet restore
@@ -29,11 +35,14 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
-      - name: Test (with coverage)
+      # Runs every test project once per target (net9.0 and net10.0). LogFilePrefix
+      # gives one .trx per project and per target; a fixed LogFileName made each
+      # run overwrite the previous one.
+      - name: Test (with coverage, net9.0 and net10.0)
         run: |
           dotnet test -c Release --no-build \
             --filter "FullyQualifiedName!~IntegrationTests" \
-            --logger "trx;LogFileName=test-results.trx" \
+            --logger "trx;LogFilePrefix=test-results" \
             --results-directory TestResults/ \
             --collect:"XPlat Code Coverage"
 
