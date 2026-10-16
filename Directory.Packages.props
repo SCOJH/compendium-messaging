@@ -5,7 +5,8 @@
   </PropertyGroup>
 
   <!-- Compendium framework base packages — published NuGets (nuget.org).
-       The messaging abstraction itself lives IN this repo (ProjectReference). -->
+       The messaging abstraction itself lives IN this repo (ProjectReference).
+       They ship net9.0 assets only; net10.0 consumes them as-is (NET10-01 leaves them alone). -->
   <ItemGroup>
     <PackageVersion Include="Compendium.Core" Version="1.0.5-preview.1" />
     <PackageVersion Include="Compendium.Abstractions" Version="1.0.5-preview.1" />
@@ -16,15 +17,33 @@
     <PackageVersion Include="MinVer" Version="6.0.0" />
   </ItemGroup>
 
-  <!-- Production runtime (union of the source adapter repos' pins; conflicts resolved highest) -->
+  <!-- Production runtime (union of the source adapter repos' pins; conflicts resolved highest).
+       System.Text.Json is no longer pinned: it comes from the shared framework on both targets
+       and the .NET 10 SDK flags a PackageReference to it as redundant (NU1510). -->
   <ItemGroup>
+    <PackageVersion Include="NSec.Cryptography" Version="24.4.0" />
+  </ItemGroup>
+
+  <!-- NET10-01: one line per target for the Microsoft.Extensions.* family, which is
+       versioned with the runtime.
+
+       The net9.0 line is the 9.0.x set consumers already run against; it does not move.
+       net10.0 cannot share it: packages built for .NET 10 ask for
+       Microsoft.Extensions.* >= 10.0.0 in their net10.0 dependency group, and a central
+       9.0.x pin would then be a package downgrade (NU1605, an error here). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
     <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.16" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.16" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.16" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.16" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.16" />
-    <PackageVersion Include="System.Text.Json" Version="9.0.0" />
-    <PackageVersion Include="NSec.Cryptography" Version="24.4.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.13" />
   </ItemGroup>
 
   <!-- Test stack -->
